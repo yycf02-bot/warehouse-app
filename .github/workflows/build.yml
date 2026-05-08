@@ -10,20 +10,53 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
     - uses: actions/checkout@v3
+
     - uses: actions/setup-python@v4
       with:
         python-version: '3.10'
-    - name: Install deps
+
+    - name: Install system deps
       run: |
         sudo apt-get update -qq
-        sudo apt-get install -y python3-pip build-essential git \
-          libffi-dev libssl-dev libsqlite3-dev liblzma-dev \
-          openjdk-17-jdk zip unzip autoconf libtool pkg-config \
-          zlib1g-dev libncurses5-dev cmake libstdc++6 libc6-i386
-        pip install buildozer cython==0.29.33
+        sudo apt-get install -y \
+          python3-pip build-essential git \
+          libffi-dev libssl-dev \
+          libsqlite3-dev liblzma-dev \
+          openjdk-17-jdk \
+          zip unzip autoconf libtool pkg-config \
+          zlib1g-dev libncurses5-dev libncursesw5-dev \
+          cmake libstdc++6 libc6-i386
+
+    - name: Install Python deps
+      run: |
+        pip install --upgrade pip
+        pip install buildozer
+        pip install cython==0.29.33
+
+    - name: Set JAVA_HOME to 17
+      run: |
+        echo "JAVA_HOME=$JAVA_HOME_17_X64" >> $GITHUB_ENV
+        echo "$JAVA_HOME_17_X64/bin" >> $GITHUB_PATH
+
+    - name: Cache Buildozer
+      uses: actions/cache@v3
+      with:
+        path: ~/.buildozer
+        key: buildozer-${{ runner.os }}-${{ hashFiles('buildozer.spec') }}
+        restore-keys: buildozer-${{ runner.os }}-
+
     - name: Build APK
-      run: buildozer android debug
+      run: |
+        export JAVA_HOME=$JAVA_HOME_17_X64
+        buildozer android debug 2>&1
+
+    - name: Show error log if failed
+      if: failure()
+      run: |
+        find .buildozer -name "*.log" -exec tail -100 {} \; 2>/dev/null || true
+
     - name: Upload APK
+      if: success()
       uses: actions/upload-artifact@v4
       with:
         name: warehouse-app
