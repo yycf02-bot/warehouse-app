@@ -15,6 +15,11 @@ android.ndk = 25b
 android.sdk = 33
 android.accept_sdk_license = True
 android.arch = arm64-v8a
+
+# 폰트 파일을 APK에 포함
+source.include_exts = py,otf,ttf
+source.include_patterns = assets/*,*.otf,*.ttf
+
 log_level = 2
 warn_on_root = 1
 
