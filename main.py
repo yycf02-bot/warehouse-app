@@ -511,7 +511,7 @@ class SelectWarehouseScreen(Screen):
 
         btn_area = GridLayout(cols=2, spacing=dp(15), size_hint=(1, 0.6))
 
-        btn_a = self._make_warehouse_btn('A', '일반 창고\n[color=000000]Click Here[/color]', '[A]', (0.2, 0.5, 1, 1))
+        btn_a = self._make_warehouse_btn('A', '일반 창고\nClick Here', '[A]', (0.2, 0.5, 1, 1))
         btn_a.bind(on_release=lambda x: self.select_warehouse('A'))
         btn_area.add_widget(btn_a)
 
@@ -531,11 +531,13 @@ class SelectWarehouseScreen(Screen):
             font_size=dp(15),
             background_normal='',
             background_color=(0, 0, 0, 0),
-            color=(1, 1, 1, 0.4) if disabled else (1, 1, 1, 1),
+            color=(0.6, 0.6, 0.7, 1) if disabled else (1, 1, 1, 1),
             disabled=disabled,
             size_hint=(1, 1),
             halign='center',
+            valign='middle',
         )
+        btn.bind(size=lambda w, v: setattr(w, 'text_size', v))
         with btn.canvas.before:
             Color(*color, 0.25 if disabled else 0.85)
             btn._bg = RoundedRectangle(pos=btn.pos, size=btn.size, radius=[dp(16)])
@@ -558,6 +560,7 @@ class CameraScreen(Screen):
         super().__init__(**kwargs)
         self.photos = []
         self._built = False
+        self.camera_available = False  # CaptureScreen에서 카메라 사용
 
     def on_enter(self):
         if not self._built:
