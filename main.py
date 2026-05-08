@@ -312,7 +312,28 @@ Window.clearcolor = (0.08, 0.08, 0.12, 1)
 # 한글 폰트 설정 (Noto Sans KR 자동 다운로드)
 # ─────────────────────────────────────────────
 FONT_URL = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/Korean/NotoSansCJKkr-Regular.otf"
-FONT_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "NotoSansKR.otf")
+
+def _get_font_path():
+    """APK/일반 환경 모두 동작하는 폰트 경로"""
+    # 1) 앱 데이터 디렉토리 (Android APK)
+    try:
+        from android.storage import app_storage_path
+        base = app_storage_path()
+        return os.path.join(base, 'NotoSansKR.otf')
+    except Exception:
+        pass
+    # 2) kivy user_data_dir
+    try:
+        from kivy.app import App
+        app = App.get_running_app()
+        if app:
+            return os.path.join(app.user_data_dir, 'NotoSansKR.otf')
+    except Exception:
+        pass
+    # 3) 스크립트 옆 (Pydroid3)
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'NotoSansKR.otf')
+
+FONT_PATH = _get_font_path()
 
 _font_ready = False
 
@@ -381,6 +402,9 @@ class LoadingScreen(Screen):
         self.add_widget(layout)
 
     def on_enter(self):
+        global FONT_PATH
+        # 앱이 완전히 시작된 후 경로 재계산 (user_data_dir 사용 가능)
+        FONT_PATH = _get_font_path()
         threading.Thread(
             target=_download_font_thread,
             args=(self._on_font_done,),
@@ -515,17 +539,30 @@ class CameraScreen(Screen):
 
         self.guide_label = KLabel(
             text='Take photos of items\nto store in warehouse',
-            font_size=dp(18),
+            font_size=dp(15),
             bold=True,
             color=(1, 1, 1, 1),
             halign='center',
-            size_hint=(1, 0.12),
+            size_hint=(1, 0.08),
         )
         root.add_widget(self.guide_label)
 
+        # 카메라 + 회전 보정 (FloatLayout으로 감싸서 canvas 회전)
+        cam_container = FloatLayout(size_hint=(1, 0.42))
         try:
-            self.camera = Camera(index=0, resolution=(640, 480), play=True, size_hint=(1, 0.55))
-            root.add_widget(self.camera)
+            self.camera = Camera(
+                index=0, resolution=(640, 480), play=True,
+                size_hint=(1, 1),
+            )
+            # Android 카메라 회전 보정
+            with self.camera.canvas.before:
+                from kivy.graphics import PushMatrix, PopMatrix, Rotate
+                PushMatrix()
+                self._cam_rot = Rotate(angle=90, origin=self.camera.center)
+                self.camera.bind(center=lambda w, v: setattr(self._cam_rot, 'origin', v))
+            with self.camera.canvas.after:
+                PopMatrix()
+            cam_container.add_widget(self.camera)
             self.camera_available = True
         except Exception:
             placeholder = KLabel(
@@ -533,24 +570,50 @@ class CameraScreen(Screen):
                 font_size=dp(24),
                 color=(0.5, 0.5, 0.6, 1),
                 halign='center',
-                size_hint=(1, 0.55),
+                size_hint=(1, 1),
             )
-            root.add_widget(placeholder)
+            cam_container.add_widget(placeholder)
             self.camera_available = False
+        root.add_widget(cam_container)
 
+        # 찍은 사진 미리보기 가로 스크롤
+        self.photo_scroll = ScrollView(
+            size_hint=(1, 0.18),
+            do_scroll_x=True,
+            do_scroll_y=False,
+        )
+        self.photo_strip = BoxLayout(
+            orientation='horizontal',
+            spacing=dp(4),
+            size_hint_x=None,
+            width=dp(0),
+            padding=dp(4),
+        )
+        with self.photo_strip.canvas.before:
+            Color(0.1, 0.1, 0.15, 1)
+            self._strip_bg = Rectangle(pos=self.photo_strip.pos, size=self.photo_strip.size)
+            self.photo_strip.bind(
+                pos=lambda w,v: setattr(self._strip_bg, 'pos', v),
+                size=lambda w,v: setattr(self._strip_bg, 'size', v),
+            )
+        self.photo_scroll.add_widget(self.photo_strip)
+        root.add_widget(self.photo_scroll)
+
+        # 상태 라벨
         self.count_label = KLabel(
-            text='Photos taken: 0  |  JSON: not loaded',
-            font_size=dp(14),
+            text='Photos: 0  |  JSON: not loaded',
+            font_size=dp(11),
             color=(0.6, 0.9, 0.6, 1),
-            size_hint=(1, 0.07),
+            size_hint=(1, 0.05),
+            halign='center',
         )
         root.add_widget(self.count_label)
 
-        btn_row = BoxLayout(orientation='horizontal', spacing=dp(12), size_hint=(1, 0.13))
+        btn_row = BoxLayout(orientation='horizontal', spacing=dp(8), size_hint=(1, 0.12))
 
         btn_capture = KButton(
             text='Capture',
-            font_size=dp(16),
+            font_size=dp(14),
             bold=True,
             background_normal='',
             background_color=(0.2, 0.6, 1, 1),
@@ -560,7 +623,7 @@ class CameraScreen(Screen):
 
         btn_json = KButton(
             text='Load JSON',
-            font_size=dp(14),
+            font_size=dp(13),
             bold=True,
             background_normal='',
             background_color=(0.8, 0.5, 0.1, 1),
@@ -570,7 +633,7 @@ class CameraScreen(Screen):
 
         btn_next = KButton(
             text='Next >',
-            font_size=dp(16),
+            font_size=dp(14),
             bold=True,
             background_normal='',
             background_color=(0.15, 0.75, 0.4, 1),
@@ -585,24 +648,62 @@ class CameraScreen(Screen):
 
         btn_back = KButton(
             text='< Back',
-            font_size=dp(13),
+            font_size=dp(12),
             background_normal='',
             background_color=(0.2, 0.2, 0.25, 1),
             color=(0.7, 0.7, 0.8, 1),
-            size_hint=(1, 0.08),
+            size_hint=(1, 0.07),
         )
         btn_back.bind(on_release=self.go_back)
         root.add_widget(btn_back)
 
         self.add_widget(root)
 
+    def _add_photo_thumbnail(self, filepath):
+        """찍은 사진을 미리보기 스트립에 추가"""
+        from kivy.uix.image import Image as KvImage
+        thumb_size = dp(80)
+        try:
+            img = KvImage(
+                source=filepath,
+                size_hint=(None, None),
+                size=(thumb_size, thumb_size),
+                fit_mode='cover',
+            )
+        except Exception:
+            # 더미 사진이면 번호 라벨
+            n = len(self.photos)
+            img = KLabel(
+                text=str(n),
+                font_size=dp(18),
+                color=(1,1,1,1),
+                size_hint=(None, None),
+                size=(thumb_size, thumb_size),
+                halign='center',
+            )
+            with img.canvas.before:
+                Color(0.3, 0.3, 0.4, 1)
+                Rectangle(pos=img.pos, size=img.size)
+                img.bind(pos=lambda w,v: None)
+
+        self.photo_strip.add_widget(img)
+        self.photo_strip.width = dp(4) + len(self.photo_strip.children) * (thumb_size + dp(4))
+        # 스크롤을 오른쪽 끝으로
+        Clock.schedule_once(lambda dt: setattr(self.photo_scroll, 'scroll_x', 1), 0.1)
+
     def capture_photo(self, *args):
         if self.camera_available:
-            filename = f'photo_{len(self.photos)+1}.png'
+            filename = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)),
+                f'photo_{len(self.photos)+1}.png'
+            )
             self.camera.export_to_png(filename)
             self.photos.append(filename)
+            self._add_photo_thumbnail(filename)
         else:
-            self.photos.append(f'dummy_photo_{len(self.photos)+1}.png')
+            dummy = f'dummy_photo_{len(self.photos)+1}.png'
+            self.photos.append(dummy)
+            self._add_photo_thumbnail(dummy)
         self._update_label()
 
     def _update_label(self):
