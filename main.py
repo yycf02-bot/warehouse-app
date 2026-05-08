@@ -314,15 +314,36 @@ Window.clearcolor = (0.08, 0.08, 0.12, 1)
 FONT_URL = "https://github.com/googlefonts/noto-cjk/raw/main/Sans/OTF/Korean/NotoSansCJKkr-Regular.otf"
 
 def _get_font_path():
-    """APK/일반 환경 모두 동작하는 폰트 경로"""
-    # 1) 앱 데이터 디렉토리 (Android APK)
+    """APK 내장 폰트 우선, 없으면 다운로드 경로"""
+    # 1) APK 내장 폰트 (저장소에 NotoSansKR.otf 올린 경우)
     try:
-        from android.storage import app_storage_path
-        base = app_storage_path()
-        return os.path.join(base, 'NotoSansKR.otf')
+        import kivy
+        # APK 내부 앱 디렉토리
+        candidates = [
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), 'NotoSansKR.otf'),
+            os.path.join(kivy.kivy_home_dir, 'NotoSansKR.otf'),
+        ]
+        # Android APK 내부 경로
+        try:
+            from android.storage import app_storage_path
+            candidates.insert(0, os.path.join(app_storage_path(), 'NotoSansKR.otf'))
+        except Exception:
+            pass
+        # Kivy resource path (APK 번들)
+        try:
+            from kivy.resources import resource_find
+            found = resource_find('NotoSansKR.otf')
+            if found:
+                return found
+        except Exception:
+            pass
+        for path in candidates:
+            if os.path.exists(path):
+                return path
     except Exception:
         pass
-    # 2) kivy user_data_dir
+
+    # 2) 다운로드 저장 경로
     try:
         from kivy.app import App
         app = App.get_running_app()
@@ -330,7 +351,6 @@ def _get_font_path():
             return os.path.join(app.user_data_dir, 'NotoSansKR.otf')
     except Exception:
         pass
-    # 3) 스크립트 옆 (Pydroid3)
     return os.path.join(os.path.dirname(os.path.abspath(__file__)), 'NotoSansKR.otf')
 
 FONT_PATH = _get_font_path()
