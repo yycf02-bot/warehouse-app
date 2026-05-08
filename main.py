@@ -359,14 +359,19 @@ _font_ready = False
 
 
 def _download_font_thread(on_done):
-    """백그라운드에서 폰트 다운로드"""
+    """백그라운드에서 폰트 다운로드 (경로 매번 재계산)"""
     try:
-        if not os.path.exists(FONT_PATH):
-            print("[폰트] 다운로드 중...")
-            urllib.request.urlretrieve(FONT_URL, FONT_PATH)
+        font_path = _get_font_path()
+        if not os.path.exists(font_path):
+            print(f"[폰트] 다운로드 중... → {font_path}")
+            # 저장 디렉토리 생성
+            font_dir = os.path.dirname(font_path)
+            if font_dir and not os.path.exists(font_dir):
+                os.makedirs(font_dir, exist_ok=True)
+            urllib.request.urlretrieve(FONT_URL, font_path)
             print("[폰트] 다운로드 완료!")
         else:
-            print("[폰트] 이미 존재함, 스킵")
+            print(f"[폰트] 이미 존재함: {font_path}")
         Clock.schedule_once(lambda dt: on_done(True), 0)
     except Exception as e:
         print(f"[폰트] 다운로드 실패: {e}")
@@ -374,10 +379,15 @@ def _download_font_thread(on_done):
 
 
 def register_font():
-    """폰트 등록"""
-    if os.path.exists(FONT_PATH):
-        LabelBase.register(name='NotoKR', fn_regular=FONT_PATH)
-        return True
+    """폰트 등록 (경로 매번 재계산)"""
+    font_path = _get_font_path()
+    if os.path.exists(font_path):
+        try:
+            LabelBase.register(name='NotoKR', fn_regular=font_path)
+            print(f"[폰트] 등록 완료: {font_path}")
+            return True
+        except Exception as e:
+            print(f"[폰트] 등록 실패: {e}")
     return False
 
 
@@ -563,51 +573,22 @@ class CameraScreen(Screen):
             bold=True,
             color=(1, 1, 1, 1),
             halign='center',
-            size_hint=(1, 0.08),
+            size_hint=(1, 0.1),
         )
         root.add_widget(self.guide_label)
 
-        # 카메라 + 회전 보정 (FloatLayout으로 감싸서 canvas 회전)
-        cam_container = FloatLayout(size_hint=(1, 0.42))
-        try:
-            self.camera = Camera(
-                index=0, resolution=(640, 480), play=True,
-                size_hint=(1, 1),
-            )
-            # Android 카메라 회전 보정
-            with self.camera.canvas.before:
-                from kivy.graphics import PushMatrix, PopMatrix, Rotate
-                PushMatrix()
-                self._cam_rot = Rotate(angle=90, origin=self.camera.center)
-                self.camera.bind(center=lambda w, v: setattr(self._cam_rot, 'origin', v))
-            with self.camera.canvas.after:
-                PopMatrix()
-            cam_container.add_widget(self.camera)
-            self.camera_available = True
-        except Exception:
-            placeholder = KLabel(
-                text='Camera\nLoading...',
-                font_size=dp(24),
-                color=(0.5, 0.5, 0.6, 1),
-                halign='center',
-                size_hint=(1, 1),
-            )
-            cam_container.add_widget(placeholder)
-            self.camera_available = False
-        root.add_widget(cam_container)
-
-        # 찍은 사진 미리보기 가로 스크롤
+        # 찍은 사진 미리보기 가로 스크롤 (메인 영역)
         self.photo_scroll = ScrollView(
-            size_hint=(1, 0.18),
+            size_hint=(1, 0.55),
             do_scroll_x=True,
             do_scroll_y=False,
         )
         self.photo_strip = BoxLayout(
             orientation='horizontal',
-            spacing=dp(4),
+            spacing=dp(6),
             size_hint_x=None,
-            width=dp(0),
-            padding=dp(4),
+            width=dp(10),
+            padding=dp(6),
         )
         with self.photo_strip.canvas.before:
             Color(0.1, 0.1, 0.15, 1)
@@ -624,22 +605,22 @@ class CameraScreen(Screen):
             text='Photos: 0  |  JSON: not loaded',
             font_size=dp(11),
             color=(0.6, 0.9, 0.6, 1),
-            size_hint=(1, 0.05),
+            size_hint=(1, 0.07),
             halign='center',
         )
         root.add_widget(self.count_label)
 
-        btn_row = BoxLayout(orientation='horizontal', spacing=dp(8), size_hint=(1, 0.12))
+        btn_row = BoxLayout(orientation='horizontal', spacing=dp(8), size_hint=(1, 0.14))
 
         btn_capture = KButton(
-            text='Capture',
+            text='Camera',
             font_size=dp(14),
             bold=True,
             background_normal='',
             background_color=(0.2, 0.6, 1, 1),
             size_hint=(0.34, 1),
         )
-        btn_capture.bind(on_release=self.capture_photo)
+        btn_capture.bind(on_release=self._go_capture)
 
         btn_json = KButton(
             text='Load JSON',
@@ -672,17 +653,26 @@ class CameraScreen(Screen):
             background_normal='',
             background_color=(0.2, 0.2, 0.25, 1),
             color=(0.7, 0.7, 0.8, 1),
-            size_hint=(1, 0.07),
+            size_hint=(1, 0.08),
         )
         btn_back.bind(on_release=self.go_back)
         root.add_widget(btn_back)
 
         self.add_widget(root)
 
+    def _go_capture(self, *args):
+        self.manager.transition = SlideTransition(direction='left')
+        self.manager.current = 'capture'
+
+    def add_photo(self, filepath):
+        """CaptureScreen에서 호출 - 사진 추가 및 썸네일 표시"""
+        self.photos.append(filepath)
+        self._add_photo_thumbnail(filepath)
+        self._update_label()
+
     def _add_photo_thumbnail(self, filepath):
-        """찍은 사진을 미리보기 스트립에 추가"""
         from kivy.uix.image import Image as KvImage
-        thumb_size = dp(80)
+        thumb_size = dp(100)
         try:
             img = KvImage(
                 source=filepath,
@@ -691,11 +681,10 @@ class CameraScreen(Screen):
                 fit_mode='cover',
             )
         except Exception:
-            # 더미 사진이면 번호 라벨
             n = len(self.photos)
             img = KLabel(
                 text=str(n),
-                font_size=dp(18),
+                font_size=dp(20),
                 color=(1,1,1,1),
                 size_hint=(None, None),
                 size=(thumb_size, thumb_size),
@@ -704,27 +693,127 @@ class CameraScreen(Screen):
             with img.canvas.before:
                 Color(0.3, 0.3, 0.4, 1)
                 Rectangle(pos=img.pos, size=img.size)
-                img.bind(pos=lambda w,v: None)
-
         self.photo_strip.add_widget(img)
-        self.photo_strip.width = dp(4) + len(self.photo_strip.children) * (thumb_size + dp(4))
-        # 스크롤을 오른쪽 끝으로
+        self.photo_strip.width = dp(6) + len(self.photo_strip.children) * (thumb_size + dp(6))
         Clock.schedule_once(lambda dt: setattr(self.photo_scroll, 'scroll_x', 1), 0.1)
 
-    def capture_photo(self, *args):
+    def _update_label(self):
+        global _loaded_json
+        json_status = f"JSON: {_loaded_json['container']['id']}" if _loaded_json else "JSON: not loaded"
+        self.count_label.text = f"Photos: {len(self.photos)}  |  {json_status}"
+
+
+# ─────────────────────────────────────────────
+# 2-1화면: 카메라 전용 촬영 화면
+# ─────────────────────────────────────────────
+class CaptureScreen(Screen):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._built = False
+        self.camera_available = False
+
+    def on_enter(self):
+        if not self._built:
+            self._built = True
+            self._build_ui()
+        # 화면 진입 시 카메라 시작
         if self.camera_available:
-            filename = os.path.join(
-                os.path.dirname(os.path.abspath(__file__)),
-                f'photo_{len(self.photos)+1}.png'
+            self.camera.play = True
+
+    def on_leave(self):
+        # 화면 벗어날 때 카메라 정지
+        if self.camera_available:
+            self.camera.play = False
+
+    def _build_ui(self):
+        root = BoxLayout(orientation='vertical')
+
+        # 카메라 뷰 (메인)
+        cam_container = FloatLayout(size_hint=(1, 0.85))
+        try:
+            self.camera = Camera(
+                index=0, resolution=(640, 480), play=True,
+                size_hint=(1, 1),
             )
-            self.camera.export_to_png(filename)
-            self.photos.append(filename)
-            self._add_photo_thumbnail(filename)
-        else:
-            dummy = f'dummy_photo_{len(self.photos)+1}.png'
-            self.photos.append(dummy)
-            self._add_photo_thumbnail(dummy)
-        self._update_label()
+            cam_container.add_widget(self.camera)
+            self.camera_available = True
+        except Exception:
+            cam_container.add_widget(KLabel(
+                text='Camera\nNot available',
+                font_size=dp(20),
+                color=(0.5, 0.5, 0.6, 1),
+                halign='center',
+                size_hint=(1, 1),
+            ))
+
+        root.add_widget(cam_container)
+
+        # 하단 버튼
+        btn_row = BoxLayout(
+            orientation='horizontal',
+            size_hint=(1, 0.15),
+            padding=dp(8), spacing=dp(10),
+        )
+        with btn_row.canvas.before:
+            Color(0.05, 0.05, 0.1, 1)
+            self._bar_bg = Rectangle(pos=btn_row.pos, size=btn_row.size)
+            btn_row.bind(pos=lambda w,v: setattr(self._bar_bg,'pos',v),
+                         size=lambda w,v: setattr(self._bar_bg,'size',v))
+
+        btn_back = KButton(
+            text='< Back',
+            font_size=dp(13),
+            background_normal='',
+            background_color=(0.25, 0.25, 0.3, 1),
+            size_hint=(0.3, 1),
+        )
+        btn_back.bind(on_release=self._go_back)
+
+        btn_shoot = KButton(
+            text='Shoot',
+            font_size=dp(16),
+            bold=True,
+            background_normal='',
+            background_color=(0.2, 0.6, 1, 1),
+            size_hint=(0.4, 1),
+        )
+        btn_shoot.bind(on_release=self._shoot)
+
+        # 빈 공간 (대칭)
+        btn_row.add_widget(btn_back)
+        btn_row.add_widget(btn_shoot)
+        btn_row.add_widget(Label(size_hint=(0.3, 1)))
+
+        root.add_widget(btn_row)
+        self.add_widget(root)
+
+    def _shoot(self, *args):
+        """사진 촬영 후 CameraScreen으로 전달"""
+        if not self.camera_available:
+            return
+        try:
+            from kivy.app import App
+            app = App.get_running_app()
+            save_dir = app.user_data_dir
+        except Exception:
+            save_dir = os.path.dirname(os.path.abspath(__file__))
+
+        # CameraScreen의 현재 사진 수로 파일명 결정
+        cam_screen = self.manager.get_screen('camera')
+        n = len(cam_screen.photos) + 1
+        filepath = os.path.join(save_dir, f'photo_{n}.png')
+
+        self.camera.export_to_png(filepath)
+
+        # CameraScreen에 전달
+        cam_screen.add_photo(filepath)
+
+        # 돌아가기
+        self._go_back()
+
+    def _go_back(self, *args):
+        self.manager.transition = SlideTransition(direction='right')
+        self.manager.current = 'camera'
 
     def _update_label(self):
         global _loaded_json
@@ -1057,6 +1146,7 @@ class WarehouseApp(App):
         sm.add_widget(CameraScreen(name='camera'))
         sm.add_widget(OrganizeScreen(name='organize'))
         sm.add_widget(Viewer3DScreen(name='viewer3d'))
+        sm.add_widget(CaptureScreen(name='capture'))
 
         return sm
 
